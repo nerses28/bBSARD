@@ -13,13 +13,27 @@ import transformers
 from gensim.models import KeyedVectors
 from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer
-
+from FlagEmbedding import BGEM3FlagModel
 from utils.common import log_step
 from typing import List
 
 transformers.logging.set_verbosity_error()
 fasttext.FastText.eprint = lambda x: None
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
+
+
+
+def last_token_pool(last_hidden_states, attention_mask):
+    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+    if left_padding:
+        return last_hidden_states[:, -1]
+    else:
+        sequence_lengths = attention_mask.sum(dim=1) - 1
+        batch_size = last_hidden_states.shape[0]
+        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+
+
+
 
 class DenseRetriever:
     def __init__(self, model, vocab, dimension, pooling_strategy, retrieval_corpus):
@@ -75,10 +89,10 @@ class DenseRetriever:
         return [self.model[w] for w in text.split()]
 
 
+
 class Word2vecRetriever(DenseRetriever):
     def __init__(self, model_path_or_name, pooling_strategy, retrieval_corpus):
         assert pooling_strategy in ['mean', 'max', 'sum'], f'Unknown pooling strategy: {pooling_strategy}'
-        #model = KeyedVectors.load_word2vec_format(model_path_or_name, binary=True, unicode_errors="ignore")
         model = KeyedVectors.load_word2vec_format(model_path_or_name, unicode_errors="ignore")
         super().__init__(model=model,
                          #vocab=set(model.vocab.keys()),
@@ -207,6 +221,7 @@ class E5ChunkedRetriever(BERTRetriever):
         doc_embedding = self._pool(token_embeddings, attention_masks)
         return doc_embedding.detach().cpu().numpy()
 
+
 class E5InstructChunkedRetriever(E5ChunkedRetriever):
     def search_all(self, queries, top_k, dist_metric):
         task = 'Given a web search query, retrieve relevant passages that answer the query.\n'
@@ -219,6 +234,7 @@ class E5InstructChunkedRetriever(E5ChunkedRetriever):
         results = np.argsort(scores, axis=1)[:, :top_k] + 1  #+1 because doc ID starts at 1.
         print("Done.")
         return results
+
 
 class EmbRetriever:
     def __init__(self, query_embeddings, doc_embeddings):
@@ -233,6 +249,7 @@ class EmbRetriever:
         results = np.argsort(scores, axis=1)[:, :top_k] + 1  #+1 because doc ID starts at 1.
         print("Done.")
         return results
+
 
 class DPRRetriever:
     def __init__(self, model_path_or_name: str, retrieval_corpus: List[str], language_code: str = "fr_FR"):
@@ -271,6 +288,7 @@ class DPRRetriever:
             results.append(top_k_indices.tolist())
         return results
 
+
 class LaBSERetriever:
     def __init__(self, model_path_or_name: str = "sentence-transformers/LaBSE", retrieval_corpus: List[str] = None):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -306,6 +324,7 @@ class LaBSERetriever:
             results.append(top_k_indices.tolist())
         return results
 
+
 class JinaRetriever:
     def __init__(self, model_path_or_name: str, retrieval_corpus: List[str]):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -337,6 +356,7 @@ class JinaRetriever:
         print("Done.")
         return results
 
+
 class GTERetriever:
     def __init__(self, model_path_or_name: str, retrieval_corpus: List[str]):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -349,7 +369,6 @@ class GTERetriever:
 
     def encode(self, texts):
         embs = []
-        i = 0
         with torch.no_grad():
             for text in texts:
                 inputs = self.tokenizer([text], max_length=8192, padding=True, truncation=True, return_tensors='pt').to(self.device)
@@ -357,9 +376,6 @@ class GTERetriever:
                 embeddings = outputs.last_hidden_state[:, 0][:768]
                 embeddings = F.normalize(embeddings, p=2, dim=1)
                 embs.extend(embeddings.cpu())
-                i += 1
-                print('text: ', i, '/', len(texts), end='\r')
-        print()
         return embs
 
     def search_all(self, queries, top_k, dist_metric):
@@ -371,3 +387,46 @@ class GTERetriever:
         results = np.argsort(scores, axis=1)[:, :top_k] + 1  #+1 because doc ID starts at 1.
         print("Done.")
         return results
+
+
+class FlagModel(DenseRetriever):
+    def __init__(self, model_path_or_name, retrieval_corpus, max_length=8192):
+        self.model = BGEM3FlagModel(model_path_or_name, use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path_or_name)
+        self.max_length=max_length
+        torch.cuda.empty_cache()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        super().__init__(model=self.model,
+                         vocab=self.tokenizer.get_vocab(),
+                         dimension=1024,
+                         pooling_strategy='mean',
+                         retrieval_corpus=retrieval_corpus)
+
+    def _embed(self, text):
+      embeddings = self.model.encode(text, batch_size=1, max_length=self.max_length)['dense_vecs']
+      return embeddings
+
+
+class RetLongCtxtFP16(DenseRetriever):
+    def __init__(self, model_path_or_name, retrieval_corpus, max_length=8192):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path_or_name)
+        self.max_length=max_length
+        torch.cuda.empty_cache()
+        self.model = AutoModel.from_pretrained(model_path_or_name, output_hidden_states=True, torch_dtype=torch.float16)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        super().__init__(model=self.model,
+                         vocab=self.tokenizer.get_vocab(),
+                         dimension=self.model.config.hidden_size,
+                         pooling_strategy='mean',
+                         retrieval_corpus=retrieval_corpus)
+
+    def _embed(self, text):
+      self.model.eval()
+      batch_dict = self.tokenizer(text, max_length=self.max_length, padding=False, truncation=True, return_tensors='pt')
+      batch_dict['input_ids'] =  batch_dict['input_ids'].to(self.device)
+      batch_dict['attention_mask'] = batch_dict['attention_mask'].to(self.device)
+      with torch.no_grad():
+        outputs = self.model(**batch_dict)
+        embeddings = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
+      return embeddings[0].detach().cpu().numpy()

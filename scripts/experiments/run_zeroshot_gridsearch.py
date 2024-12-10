@@ -134,12 +134,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--articles_path", 
                         type=str, 
-                        default=abspath(join(__file__, "../../../data/bsard_v1/articles_fr.csv")),
+                        default=abspath(join(__file__, "../../../data/bbsard/fr/corpus.csv")),
                         help="Path of the data file containing the law articles."
     )
     parser.add_argument("--questions_path", 
                         type=str, 
-                        default=abspath(join(__file__, "../../../data/bsard_v1/questions_fr_train.csv")),
+                        default=abspath(join(__file__, "../../../data/bbsard/fr/test.csv")),
                         help="Path of the data file containing the test questions."
     )
     parser.add_argument("--lem",

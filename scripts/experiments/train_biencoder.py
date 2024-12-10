@@ -265,13 +265,13 @@ class BiEncoderTrainer(object):
 if __name__ == '__main__':
     # 1. Initialize a new BiEncoder model to train.
     model = BiEncoder(is_siamese=True,
-                      q_model_name_or_path='camembert-base',
+                      q_model_name_or_path='DTAI-KULeuven/robbert-2023-dutch-base',
                       truncation=True,
                       max_input_len=1000,
                       chunk_size=200,
                       window_size=20,
                       pooling_mode='cls',
-                      score_fn='dot')
+                      score_fn='cos')
     
     # 1'. OR load an already-trained BiEncoder.
     # checkpoint_path = "output/training/Dec14-15-29-56_siamese-camembert-base-1000-200-20-22-fp16/99"
@@ -280,14 +280,12 @@ if __name__ == '__main__':
     # 2. Initialize the BiEncoder Trainer.
     trainer = BiEncoderTrainer(model=model, 
                                loss_fn=nn.CrossEntropyLoss(), 
-                               queries_filepath=abspath("/home/nerses/projects/LAW/bsard/french/fr_train.csv"),
-                               documents_filepath=abspath("/home/nerses/projects/LAW/bsard/french/fr_articles.csv"),
-                               #queries_filepath=abspath(join(__file__, "../../../data/bsard_v1questions_fr_train.csv")),
-                               #documents_filepath=abspath(join(__file__, "../../../data/bsard_v1/articles_fr.csv")),
-                               batch_size=1, #NB: There are ~4500 training samples -> num_steps_per_epoch = 4500/batch_size = .
-                               epochs=1,
+                               queries_filepath=abspath("../../data/bbsard/nl/train.csv"),           # for French : /nl/ --> /fr/
+                               documents_filepath=abspath("../../data/bbsard/nl/corpus.csv"),        # for French : /nl/ --> /fr/
+                               batch_size=24, 
+                               epochs=100,
                                warmup_steps=500,
-                               log_steps=2, 
+                               log_steps=10, 
                                use_amp=True)
     
     # 3. Launch training.
