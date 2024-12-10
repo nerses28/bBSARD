@@ -1,3 +1,5 @@
+This is the repository for the paper [Bilingual BSARD: Extending Statutory Article Retrieval to Dutch](www.arxiv.com), which introduces bBSARD by extending the [BSARD](https://huggingface.co/datasets/maastrichtlawtech/bsard) dataset to Dutch. The code is adapted from [BSARD](https://github.com/maastrichtlawtech/bsard).
+
 ### Setup
 
 First, you should install a virtual environment:
